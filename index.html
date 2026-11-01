@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Dhikr mains libres</title>
+<meta name="description" content="Compteur de dhikr mains libres : détecte chaque répétition à la voix.">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Dhikr">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root {
+    --bg: #000;
+    --panel: #121212;
+    --panel2: #1c1c1c;
+    --line: #2c2c2c;
+    --fg: #f5f5f5;
+    --muted: #9a9a9a;
+    --green: #2fd36f;
+    --amber: #ffb020;
+    --red: #ff5a5a;
+    --gold: #e7c35a;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+    touch-action: manipulation;
+    -webkit-user-select: none; user-select: none;
+  }
+  button { font: inherit; color: inherit; border: 0; cursor: pointer; touch-action: manipulation; }
+
+  /* ---------- Écran principal ---------- */
+  #main {
+    height: 100%;
+    display: flex; flex-direction: column;
+    padding: calc(env(safe-area-inset-top) + 10px) calc(env(safe-area-inset-right) + 16px)
+             calc(env(safe-area-inset-bottom) + 14px) calc(env(safe-area-inset-left) + 16px);
+    gap: 12px;
+  }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .pill {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 999px; padding: 8px 14px; min-width: 0;
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); flex: none; }
+  .pill.on .dot { background: var(--green); box-shadow: 0 0 10px var(--green); }
+  .pill.calib .dot { background: var(--amber); }
+  #statusText { font-size: 15px; font-weight: 600; white-space: nowrap; }
+  .meter { position: relative; width: 90px; height: 10px; background: #2a2a2a; border-radius: 5px; overflow: hidden; flex: none; }
+  #meterFill { position: absolute; inset: 0 auto 0 0; width: 0; background: #666; transition: width 60ms linear; }
+  #meterFill.above { background: var(--green); }
+  #meterThr { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--red); }
+  .icon-btn { width: 52px; height: 52px; border-radius: 50%; background: var(--panel); border: 1px solid var(--line); display: grid; place-items: center; flex: none; }
+  .icon-btn svg { width: 26px; height: 26px; }
+
+  .counter { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 0; }
+  #count {
+    font-weight: 800; line-height: 0.95; letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+    font-size: min(46vw, 34vh);
+    transition: transform 120ms ease, color 200ms;
+  }
+  #count.d3 { font-size: min(36vw, 30vh); }
+  #count.d4 { font-size: min(27vw, 26vh); }
+  #count.d5 { font-size: min(21vw, 22vh); }
+  #count.bump { transform: scale(1.06); color: #fff; }
+  #count.done { color: var(--gold); }
+  .goal { font-size: 22px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .progress { width: min(320px, 70%); height: 6px; background: #222; border-radius: 3px; margin-top: 12px; overflow: hidden; }
+  #progressFill { height: 100%; width: 0; background: var(--green); transition: width 200ms; }
+  #progressFill.done { background: var(--gold); }
+  .dhikr { margin-top: 14px; text-align: center; color: #777; font-size: 20px; line-height: 1.4; }
+  .dhikr small { font-size: 13px; }
+  /* En mode test, on laisse de la place au journal */
+  #main.debug-on #count { font-size: min(30vw, 15vh); }
+  #main.debug-on #count.d4, #main.debug-on #count.d5 { font-size: min(20vw, 12vh); }
+  #main.debug-on .dhikr { display: none; }
+
+  .controls { display: flex; flex-direction: column; gap: 10px; }
+  .big {
+    height: 84px; border-radius: 22px; font-size: 28px; font-weight: 800;
+    background: var(--green); color: #00210d;
+  }
+  .big.pause { background: var(--amber); color: #2a1a00; }
+  .row { display: flex; gap: 10px; }
+  .row button { flex: 1; height: 68px; border-radius: 18px; font-size: 28px; font-weight: 700; background: var(--panel2); border: 1px solid var(--line); }
+  .row button:active, .small:active, .big:active { filter: brightness(1.3); }
+  .small { height: 44px; border-radius: 14px; font-size: 15px; background: transparent; color: var(--muted); border: 1px solid var(--line); }
+
+  .notice {
+    position: fixed; left: 16px; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 16px);
+    background: #3a2a00; color: #ffe2a0; border: 1px solid #6b5000;
+    border-radius: 16px; padding: 14px 16px; font-size: 15px; line-height: 1.4; z-index: 20;
+  }
+  .notice b { display: block; margin-top: 6px; font-size: 13px; color: #d9b860; font-weight: 500; }
+
+  /* ---------- Debug ---------- */
+  #debug { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px; font-size: 13px; display: flex; flex-direction: column; gap: 8px; max-height: 38vh; min-height: 0; }
+  .dgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 2px 10px; font-variant-numeric: tabular-nums; }
+  .dgrid span { color: var(--muted); }
+  #graph { width: 100%; height: 70px; background: #070707; border-radius: 8px; display: block; }
+  #log { flex: 1; overflow-y: auto; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5; min-height: 40px; -webkit-user-select: text; user-select: text; }
+  #log .ok { color: var(--green); } #log .ko { color: var(--red); } #log .ev { color: var(--muted); }
+  .dbtns { display: flex; gap: 8px; }
+  .dbtns button { flex: 1; height: 36px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--line); font-size: 13px; }
+
+  /* ---------- Réglages ---------- */
+  #settings {
+    position: fixed; inset: 0; background: var(--bg); z-index: 10; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: calc(env(safe-area-inset-top) + 10px) calc(env(safe-area-inset-right) + 16px)
+             calc(env(safe-area-inset-bottom) + 30px) calc(env(safe-area-inset-left) + 16px);
+  }
+  .shead { display: flex; align-items: center; justify-content: space-between; position: sticky; top: -10px; background: var(--bg); padding: 6px 0 10px; z-index: 2; }
+  .shead h1 { font-size: 26px; margin: 0; }
+  .close { height: 46px; padding: 0 20px; border-radius: 23px; background: var(--green); color: #00210d; font-weight: 700; font-size: 17px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 14px; }
+  .card h2 { font-size: 17px; margin: 0 0 4px; }
+  .hint { color: var(--muted); font-size: 13px; line-height: 1.4; margin: 2px 0 10px; }
+  .field { margin: 14px 0 4px; }
+  .field label, .lab { display: flex; justify-content: space-between; font-size: 15px; margin-bottom: 8px; gap: 10px; }
+  .field label output { color: var(--green); font-variant-numeric: tabular-nums; font-weight: 600; }
+  input[type=range] { width: 100%; accent-color: var(--green); height: 30px; }
+  input[type=number], select {
+    width: 100%; height: 48px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--fg); font-size: 18px; padding: 0 12px;
+    -webkit-user-select: text; user-select: text;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .chips button { height: 42px; min-width: 58px; padding: 0 12px; border-radius: 21px; background: var(--panel2); border: 1px solid var(--line); font-size: 16px; font-weight: 600; }
+  .chips button.sel { background: var(--green); color: #00210d; border-color: var(--green); }
+  .inline { display: flex; gap: 8px; }
+  .inline input { flex: 1; }
+  .btn { height: 48px; padding: 0 16px; border-radius: 12px; background: var(--panel2); border: 1px solid var(--line); font-size: 16px; font-weight: 600; flex: none; }
+  .btn.primary { background: var(--green); color: #00210d; border-color: var(--green); width: 100%; height: 54px; font-size: 18px; }
+  .check { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 15px; }
+  .check:first-of-type { border-top: 0; }
+  .check input { width: 26px; height: 26px; accent-color: var(--green); flex: none; }
+  .seg { display: flex; background: var(--panel2); border-radius: 12px; padding: 4px; gap: 4px; margin: 8px 0; }
+  .seg label { flex: 1; text-align: center; padding: 12px 0; border-radius: 9px; font-weight: 600; font-size: 16px; }
+  .seg input { display: none; }
+  .seg label:has(input:checked) { background: var(--green); color: #00210d; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .grid3 small { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  #calibInfo { margin-top: 10px; font-size: 15px; color: var(--amber); min-height: 1.2em; }
+  .version { text-align: center; color: #555; font-size: 12px; margin-top: 10px; }
+
+  /* Téléphone à l'horizontale sur le support */
+  @media (orientation: landscape) and (max-height: 600px) {
+    #main { display: grid; grid-template-columns: 1fr minmax(260px, 38%); grid-template-rows: auto 1fr auto; column-gap: 20px; }
+    .top { grid-column: 1 / -1; }
+    .counter { grid-column: 1; grid-row: 2 / 4; }
+    #debug { grid-column: 2; grid-row: 2; max-height: none; }
+    .controls { grid-column: 2; grid-row: 3; align-self: end; }
+    #count { font-size: min(30vw, 52vh); }
+    #count.d3 { font-size: min(24vw, 46vh); }
+    #count.d4 { font-size: min(18vw, 40vh); }
+    #count.d5 { font-size: min(14vw, 34vh); }
+    .dhikr { display: none; }
+    .big { height: 72px; }
+    .row button { height: 60px; }
+  }
+</style>
+</head>
+<body>
+
+<main id="main">
+  <header class="top">
+    <div id="status" class="pill" aria-live="polite">
+      <span class="dot"></span>
+      <span id="statusText">En pause</span>
+      <span class="meter" aria-hidden="true"><span id="meterFill"></span><span id="meterThr"></span></span>
+    </div>
+    <button id="btnSettings" class="icon-btn" aria-label="Réglages">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </header>
+
+  <section class="counter">
+    <div id="count">0</div>
+    <div class="goal" id="goalText">/ 100</div>
+    <div class="progress"><div id="progressFill"></div></div>
+    <div class="dhikr">أستغفر الله وأتوب إليه<br><small>Astaghfirullah wa atubu ilayh</small></div>
+  </section>
+
+  <section id="debug" hidden>
+    <div class="dgrid">
+      <div><span>Niveau :</span> <b id="dLevel">–</b></div>
+      <div><span>Seuil :</span> <b id="dThr">–</b></div>
+      <div><span>État :</span> <b id="dState">–</b></div>
+      <div><span>Écran :</span> <b id="dWake">–</b></div>
+      <div style="grid-column:1/-1"><span>Micro :</span> <b id="dMic">–</b></div>
+    </div>
+    <canvas id="graph"></canvas>
+    <div id="log"></div>
+    <div class="dbtns">
+      <button id="btnCopyLog">Copier le journal</button>
+      <button id="btnClearLog">Effacer</button>
+    </div>
+  </section>
+
+  <section class="controls">
+    <button id="btnStart" class="big">Démarrer</button>
+    <div class="row">
+      <button id="btnMinus" aria-label="Moins un">−1</button>
+      <button id="btnPlus" aria-label="Plus un">+1</button>
+    </div>
+    <button id="btnReset" class="small">Remise à zéro</button>
+  </section>
+</main>
+
+<div id="notice" class="notice" hidden role="alert"></div>
+
+<!-- ================= RÉGLAGES ================= -->
+<div id="settings" hidden>
+  <div class="shead">
+    <h1>Réglages</h1>
+    <button id="btnClose" class="close">Fermer</button>
+  </div>
+
+  <div class="card">
+    <h2>Objectif</h2>
+    <p class="hint">Un signal spécial retentit à l'objectif (et à chaque multiple). Le compteur continue ensuite.</p>
+    <div class="chips" id="goalChips">
+      <button data-goal="33">33</button><button data-goal="50">50</button><button data-goal="99">99</button>
+      <button data-goal="100">100</button><button data-goal="300">300</button><button data-goal="1000">1000</button>
+    </div>
+    <input type="number" id="set-goal" min="1" inputmode="numeric">
+  </div>
+
+  <div class="card">
+    <h2>Point de départ</h2>
+    <p class="hint">Si vous en avez déjà fait à la main, entrez le nombre et touchez « Appliquer ».</p>
+    <div class="inline">
+      <input type="number" id="startValue" min="0" inputmode="numeric" placeholder="ex. 50">
+      <button id="btnApplyStart" class="btn">Appliquer</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Détection de la voix</h2>
+    <p class="hint">Faites la calibration voiture à l'arrêt, moteur allumé, sans parler pendant 3 secondes.</p>
+    <button id="btnCalibrate" class="btn primary">Calibrer (3 s de silence)</button>
+    <div id="calibInfo"></div>
+
+    <div class="field">
+      <label for="set-threshold">Seuil de détection <output id="val-threshold"></output></label>
+      <input type="range" id="set-threshold" min="-85" max="-10" step="1">
+      <p class="hint">Vers la gauche = plus sensible (capte plus facilement). Vers la droite = moins sensible (ignore plus de bruit).</p>
+    </div>
+    <div class="field">
+      <label for="set-calibMargin">Marge de calibration <output id="val-calibMargin"></output></label>
+      <input type="range" id="set-calibMargin" min="3" max="20" step="1">
+      <p class="hint">De combien le seuil est placé au-dessus du bruit mesuré.</p>
+    </div>
+    <div class="field">
+      <label for="set-minVoice">Durée minimale d'une récitation <output id="val-minVoice"></output></label>
+      <input type="range" id="set-minVoice" min="200" max="3000" step="50">
+      <p class="hint">Un son plus court est ignoré (toux, choc, clignotant).</p>
+    </div>
+    <div class="field">
+      <label for="set-silence">Silence entre deux récitations <output id="val-silence"></output></label>
+      <input type="range" id="set-silence" min="150" max="2000" step="50">
+      <p class="hint">Trop court : une récitation est comptée 2 fois. Trop long : deux récitations rapides comptent pour 1.</p>
+    </div>
+    <div class="field">
+      <label for="set-maxVoice">Durée maximale d'un bloc <output id="val-maxVoice"></output></label>
+      <input type="range" id="set-maxVoice" min="2000" max="20000" step="500">
+      <p class="hint">Un bloc plus long est ignoré (radio, conversation, gros bruit continu).</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Micro (traitement du son)</h2>
+    <p class="hint">À tester en voiture : activez/désactivez et comparez dans le mode test. Le micro redémarre à chaque changement.</p>
+    <label class="check">Annulation d'écho <input type="checkbox" id="set-echo"></label>
+    <label class="check">Réduction de bruit <input type="checkbox" id="set-noise"></label>
+    <label class="check">Gain automatique <input type="checkbox" id="set-agc"></label>
+  </div>
+
+  <div class="card">
+    <h2>Retour sonore</h2>
+    <div class="seg">
+      <label><input type="radio" name="mode" value="beep"> Bips</label>
+      <label><input type="radio" name="mode" value="voice"> Voix</label>
+    </div>
+
+    <div id="beepOpts">
+      <p class="hint">Nombre de bips selon le palier atteint (le plus grand l'emporte).</p>
+      <div class="grid3">
+        <div><small>1 bip tous les</small><input type="number" id="set-beep1" min="1" inputmode="numeric"></div>
+        <div><small>2 bips tous les</small><input type="number" id="set-beep2" min="1" inputmode="numeric"></div>
+        <div><small>3 bips tous les</small><input type="number" id="set-beep3" min="1" inputmode="numeric"></div>
+      </div>
+    </div>
+
+    <div id="voiceOpts">
+      <div class="field">
+        <div class="lab">Voix</div>
+        <select id="voiceSelect"></select>
+      </div>
+      <div class="field">
+        <div class="lab">Annoncer tous les</div>
+        <input type="number" id="set-voiceStep" min="1" inputmode="numeric">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="set-volume">Volume <output id="val-volume"></output></label>
+      <input type="range" id="set-volume" min="0.1" max="1" step="0.05">
+    </div>
+    <label class="check">Petit « tic » à chaque répétition comptée <input type="checkbox" id="set-tick"></label>
+    <div class="inline" style="margin-top:8px">
+      <button id="btnTestStep" class="btn" style="flex:1">Tester palier</button>
+      <button id="btnTestGoal" class="btn" style="flex:1">Tester objectif</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Mode test</h2>
+    <label class="check">Afficher l'écran de test (niveau, seuil, journal) <input type="checkbox" id="set-debug"></label>
+  </div>
+
+  <div class="version">Prototype v0.1 — un seul dhikr : Astaghfirullah wa atubu ilayh</div>
+</div>
+
+<script>
+'use strict';
+
+/* =====================================================================
+   1. RÉGLAGES PAR DÉFAUT ET SAUVEGARDE
+   ===================================================================== */
+const DEFAULTS = {
+  goal: 100,
+  threshold: -50,     // seuil en dB : au-dessus = "voix"
+  calibMargin: 8,     // marge ajoutée au bruit mesuré lors de la calibration
+  minVoice: 700,      // ms : durée minimale d'une récitation
+  silence: 450,       // ms : silence qui sépare deux récitations
+  maxVoice: 8000,     // ms : au-delà, on considère que c'est du bruit
+  echo: true, noise: true, agc: false,
+  mode: 'beep',       // 'beep' ou 'voice'
+  beep1: 10, beep2: 50, beep3: 100,
+  voiceURI: '', voiceStep: 10,
+  volume: 1,
+  tick: false,
+  debug: false
+};
+const KEY = 'dhikr-proto-v1';
+const LOGKEY = 'dhikr-proto-log-v1';
+
+function loadState() {
+  try {
+    const d = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (d) return { S: Object.assign({}, DEFAULTS, d.settings), count: Number.isFinite(d.count) ? d.count : 0 };
+  } catch (e) {}
+  return { S: Object.assign({}, DEFAULTS), count: 0 };
+}
+let { S, count } = loadState();
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify({ settings: S, count })); } catch (e) {}
+}
+
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+/* =====================================================================
+   2. MICRO ET MESURE DU NIVEAU SONORE
+   ===================================================================== */
+let ctx = null, stream = null, source = null, analyser = null, sink = null, buf = null, timer = null;
+let running = false;            // l'utilisateur a appuyé sur Démarrer
+let calibrating = false, calibSamples = [];
+let levelDb = -100;             // niveau sonore lissé
+let muteUntil = 0;              // détection en pause jusqu'à cet instant (pendant bips / voix)
+let inVoice = false, voiceStart = 0, lastAbove = 0;
+let speechPrimed = false;
+
+async function ensureContext() {
+  if (!ctx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    ctx = new AC();
+    ctx.onstatechange = () => logEvent('Audio : ' + ctx.state);
+  }
+  if (ctx.state !== 'running') { try { await ctx.resume(); } catch (e) {} }
+}
+
+function micTrack() { return stream ? stream.getAudioTracks()[0] : null; }
+function micDead() { const t = micTrack(); return !t || t.readyState === 'ended' || t.muted; }
+
+async function startMic() {
+  stopMic();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('nomedia');
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: S.echo, noiseSuppression: S.noise, autoGainControl: S.agc },
+    video: false
+  });
+  source = ctx.createMediaStreamSource(stream);
+  analyser = ctx.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0;
+  // Safari a parfois besoin que le circuit audio aille jusqu'à la sortie : on y branche un volume à 0.
+  sink = ctx.createGain(); sink.gain.value = 0;
+  source.connect(analyser); analyser.connect(sink); sink.connect(ctx.destination);
+  buf = new Float32Array(analyser.fftSize);
+  const t = micTrack();
+  if (t) {
+    t.onended = () => logEvent('Micro coupé par le système');
+    t.onmute = () => logEvent('Micro muet (système)');
+    t.onunmute = () => logEvent('Micro réactivé');
+  }
+  updateMicInfo();
+  logEvent('Micro démarré');
+  if (!timer) timer = setInterval(tick, 25);
+}
+
+function stopMic() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  [source, analyser, sink].forEach(n => { if (n) try { n.disconnect(); } catch (e) {} });
+  source = analyser = sink = null;
+  levelDb = -100;
+}
+
+// Appelée 40 fois par seconde : mesure le volume (RMS) et fait tourner la détection.
+let tickN = 0;
+function tick() {
+  const now = performance.now();
+  if (analyser) {
+    if (analyser.getFloatTimeDomainData) analyser.getFloatTimeDomainData(buf);
+    else { const b = new Uint8Array(buf.length); analyser.getByteTimeDomainData(b); for (let i = 0; i < b.length; i++) buf[i] = (b[i] - 128) / 128; }
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    const rms = Math.sqrt(sum / buf.length);
+    const db = rms > 0 ? Math.max(-100, 20 * Math.log10(rms)) : -100;
+    levelDb = levelDb * 0.5 + db * 0.5;
+  } else {
+    levelDb = -100;
+  }
+
+  let counted = false;
+  if (calibrating) calibSamples.push(levelDb);
+  else if (running && analyser) counted = detect(now);
+
+  pushHistory(counted, now);
+  renderMeter();
+  if (S.debug && (++tickN % 2 === 0)) renderDebugLive(now);
+}
+
+/* =====================================================================
+   3. DÉTECTION D'UNE RÉPÉTITION (bloc de voix + silence)
+   ===================================================================== */
+function detect(now) {
+  if (now < muteUntil) { inVoice = false; return false; }   // l'app parle : on n'écoute pas
+  const above = levelDb > S.threshold;
+  if (!inVoice) {
+    if (above) { inVoice = true; voiceStart = now; lastAbove = now; }
+    return false;
+  }
+  if (above) { lastAbove = now; return false; }
+  if (now - lastAbove < S.silence) return false;           // petit trou entre deux mots : on attend
+
+  // Le silence a duré assez longtemps : fin du bloc.
+  inVoice = false;
+  const dur = Math.round(lastAbove - voiceStart);
+  if (dur < S.minVoice) { if (dur >= 120) addLog(dur, false, 'trop court'); return false; }
+  if (dur > S.maxVoice) { addLog(dur, false, 'trop long'); return false; }
+  increment();
+  addLog(dur, true);
+  return true;
+}
+
+/* =====================================================================
+   4. COMPTEUR
+   ===================================================================== */
+function setCount(n) { count = Math.max(0, Math.round(n)); save(); renderCount(); }
+function increment() {
+  setCount(count + 1);
+  const el = $('count');
+  el.classList.add('bump'); setTimeout(() => el.classList.remove('bump'), 160);
+  feedback(count);
+}
+function isGoal(n) { return S.goal > 0 && n >= S.goal && n % S.goal === 0; }
+
+/* =====================================================================
+   5. SONS : BIPS, VOIX, SIGNAL D'OBJECTIF
+   ===================================================================== */
+function muteFor(ms) { muteUntil = Math.max(muteUntil, performance.now() + ms + 350); }
+
+function tone(freq, t0, dur, vol, type) {
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type || 'triangle';
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
+  g.gain.setValueAtTime(vol, t0 + dur - 0.03);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(ctx.destination);
+  o.start(t0); o.stop(t0 + dur + 0.02);
+}
+function beeps(k) {
+  if (!ctx || k < 1) return 0;
+  const t = ctx.currentTime + 0.02;
+  for (let i = 0; i < k; i++) tone(1000, t + i * 0.25, 0.14, S.volume);
+  const ms = k * 250; muteFor(ms); return ms;
+}
+function goalSignal() {
+  if (!ctx) return 0;
+  const t = ctx.currentTime + 0.02;
+  [523, 659, 784, 1047].forEach((f, i) => tone(f, t + i * 0.17, i === 3 ? 0.5 : 0.15, S.volume, 'sine'));
+  const ms = 3 * 170 + 500; muteFor(ms); return ms;
+}
+function tickSound() {
+  if (!ctx) return;
+  tone(1600, ctx.currentTime + 0.01, 0.04, S.volume * 0.5, 'sine');
+  muteFor(60);
+}
+
+function frVoice() {
+  if (!('speechSynthesis' in window)) return null;
+  const vs = speechSynthesis.getVoices();
+  return vs.find(v => v.voiceURI === S.voiceURI) || vs.find(v => /^fr[-_]FR/i.test(v.lang)) || vs.find(v => /^fr/i.test(v.lang)) || null;
+}
+function speak(text) {
+  if (!('speechSynthesis' in window)) { beeps(1); return; }
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'fr-FR'; u.rate = 1.05; u.volume = S.volume;
+  const v = frVoice(); if (v) u.voice = v;
+  muteUntil = Infinity;                    // on n'écoute plus tant que la voix parle
+  let done = false;
+  const end = () => { if (done) return; done = true; muteUntil = performance.now() + 400; };
+  u.onend = end; u.onerror = end;
+  setTimeout(end, 4000);                   // sécurité si Safari n'envoie pas "fin"
+  speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+}
+function primeSpeech() {
+  // iOS n'autorise la voix qu'après un geste : on prononce un "rien" au premier Démarrer.
+  if (speechPrimed || !('speechSynthesis' in window)) return;
+  speechPrimed = true;
+  const u = new SpeechSynthesisUtterance(' '); u.volume = 0;
+  speechSynthesis.speak(u);
+}
+
+function feedback(n) {
+  const goal = isGoal(n);
+  if (S.mode === 'voice') {
+    if (goal) {
+      const ms = goalSignal();
+      muteUntil = Infinity;
+      setTimeout(() => speak('Objectif atteint. ' + n), ms);
+    } else if (S.voiceStep > 0 && n % S.voiceStep === 0) {
+      speak(String(n));
+    } else if (S.tick) tickSound();
+  } else {
+    if (goal) { goalSignal(); return; }
+    const k = (S.beep3 > 0 && n % S.beep3 === 0) ? 3 : (S.beep2 > 0 && n % S.beep2 === 0) ? 2 : (S.beep1 > 0 && n % S.beep1 === 0) ? 1 : 0;
+    if (k) beeps(k); else if (S.tick) tickSound();
+  }
+}
+
+/* =====================================================================
+   6. ÉCRAN ALLUMÉ (Wake Lock)
+   ===================================================================== */
+let wakeLock = null, wakeWarned = false;
+const WAKE_HELP = "Pour éviter la mise en veille : Réglages de l'iPhone › Luminosité et affichage › Verrouillage automatique › Jamais (pensez à le remettre après).";
+async function keepAwake() {
+  if (wakeLock) return;
+  if (!('wakeLock' in navigator)) { warnWake("Cet iPhone ne permet pas à la page de garder l'écran allumé."); return; }
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; logEvent('Écran : maintien relâché'); });
+    logEvent('Écran : maintenu allumé');
+  } catch (e) {
+    warnWake("Impossible de garder l'écran allumé automatiquement.");
+  }
+}
+function warnWake(msg) {
+  logEvent('Écran : maintien impossible');
+  if (wakeWarned) return;
+  wakeWarned = true;
+  showNotice(msg + '<b>' + WAKE_HELP + '</b>');
+}
+function releaseWake() { if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; } }
+
+/* =====================================================================
+   7. DÉMARRER / PAUSE / REPRISE APRÈS VERROUILLAGE
+   ===================================================================== */
+function micErrorMessage(e) {
+  if (!window.isSecureContext) return "Le micro ne fonctionne que sur une page sécurisée (adresse en https://).";
+  if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError'))
+    return "L'accès au micro a été refusé.<b>Réglages de l'iPhone › Safari › Microphone › Autoriser, puis rechargez la page.</b>";
+  if (e && e.name === 'NotFoundError') return "Aucun micro trouvé.";
+  return "Le micro n'a pas pu démarrer (" + (e && (e.name || e.message)) + ").";
+}
+
+async function start() {
+  try {
+    await ensureContext();
+    primeSpeech();
+    if (micDead()) await startMic();
+    running = true; inVoice = false;
+    muteUntil = performance.now() + 300;
+    hideNotice();
+    keepAwake();
+    logEvent('▶ Démarrer');
+  } catch (e) {
+    running = false;
+    showNotice(micErrorMessage(e));
+  }
+  renderAll();
+}
+function pause() {
+  running = false; inVoice = false;
+  stopMic();
+  releaseWake();
+  logEvent('⏸ Pause');
+  renderAll();
+}
+
+// Quand on revient sur l'app (écran déverrouillé, retour depuis une autre app)
+async function recover() {
+  try {
+    await ensureContext();
+    if (micDead()) { logEvent('Redémarrage du micro'); await startMic(); }
+    inVoice = false; muteUntil = performance.now() + 500;
+    keepAwake();
+  } catch (e) {
+    pause();
+    showNotice("Le micro s'est arrêté pendant que l'app était cachée. Touchez « Démarrer » pour reprendre.");
+  }
+  renderAll();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') logEvent('Page cachée (verrouillage ou autre app)');
+  else { logEvent('Page de nouveau visible'); if (running) recover(); }
+});
+
+/* =====================================================================
+   8. CALIBRATION
+   ===================================================================== */
+async function calibrate() {
+  if (calibrating) return;
+  const info = $('calibInfo');
+  try { await ensureContext(); if (micDead()) await startMic(); }
+  catch (e) { showNotice(micErrorMessage(e)); return; }
+  calibrating = true; calibSamples = []; renderStatus();
+  $('btnCalibrate').disabled = true;
+  for (let s = 3; s > 0; s--) { info.textContent = 'Silence… ' + s; await sleep(1000); }
+  calibrating = false;
+  $('btnCalibrate').disabled = false;
+  const arr = calibSamples.slice(6).sort((a, b) => a - b);
+  if (arr.length < 10) { info.textContent = "Échec : le micro ne renvoie rien. Réessayez."; renderStatus(); return; }
+  const noise = arr[Math.floor(arr.length * 0.9)];
+  const thr = Math.round(clamp(noise + S.calibMargin, -85, -10));
+  S.threshold = thr; save(); syncSettingsUI();
+  info.textContent = 'Bruit ambiant : ' + Math.round(noise) + ' dB → seuil réglé à ' + thr + ' dB';
+  logEvent('Calibration : bruit ' + Math.round(noise) + ' dB, seuil ' + thr + ' dB');
+  beeps(1);
+  if (!running) { setTimeout(() => { if (!running && !calibrating) stopMic(); renderAll(); }, 400); }
+  renderAll();
+}
+
+/* =====================================================================
+   9. AFFICHAGE
+   ===================================================================== */
+const DB_MIN = -90, DB_MAX = -10;
+const pct = db => clamp((db - DB_MIN) / (DB_MAX - DB_MIN), 0, 1) * 100;
+
+function renderCount() {
+  const el = $('count');
+  el.textContent = count;
+  const d = String(count).length;
+  el.className = d >= 5 ? 'd5' : d === 4 ? 'd4' : d === 3 ? 'd3' : '';
+  const reached = S.goal > 0 && count >= S.goal;
+  el.classList.toggle('done', reached);
+  $('goalText').textContent = '/ ' + S.goal;
+  const p = S.goal > 0 ? (reached ? 100 : (count / S.goal) * 100) : 0;
+  $('progressFill').style.width = p + '%';
+  $('progressFill').classList.toggle('done', reached);
+}
+function renderStatus() {
+  const pill = $('status');
+  pill.classList.toggle('on', running && !calibrating);
+  pill.classList.toggle('calib', calibrating);
+  $('statusText').textContent = calibrating ? 'Calibration…' : running ? 'Micro actif' : 'En pause';
+  const b = $('btnStart');
+  b.textContent = running ? 'Pause' : 'Démarrer';
+  b.classList.toggle('pause', running);
+}
+function renderMeter() {
+  $('meterFill').style.width = pct(levelDb) + '%';
+  $('meterFill').classList.toggle('above', levelDb > S.threshold);
+  $('meterThr').style.left = 'calc(' + pct(S.threshold) + '% - 1px)';
+}
+function renderAll() {
+  renderCount(); renderStatus(); renderMeter();
+  $('debug').hidden = !S.debug;
+  $('main').classList.toggle('debug-on', S.debug);
+  if (S.debug) { renderLog(); renderDebugLive(performance.now()); }
+}
+
+let noticeTimer = null;
+function showNotice(html) {
+  const n = $('notice');
+  n.innerHTML = html + '<b>(toucher pour fermer)</b>';
+  n.hidden = false;
+  clearTimeout(noticeTimer); noticeTimer = setTimeout(hideNotice, 15000);
+}
+function hideNotice() { $('notice').hidden = true; }
+
+/* =====================================================================
+   10. MODE TEST : niveau en direct, graphique, journal
+   ===================================================================== */
+const history = [];   // ~8 secondes de niveaux sonores
+function pushHistory(counted, now) {
+  history.push({ db: levelDb, v: inVoice, c: counted, m: now < muteUntil });
+  if (history.length > 320) history.shift();
+}
+
+let logItems = [];
+try { logItems = JSON.parse(localStorage.getItem(LOGKEY) || '[]'); } catch (e) {}
+function hhmmss() { return new Date().toLocaleTimeString('fr-FR'); }
+function saveLog() { try { localStorage.setItem(LOGKEY, JSON.stringify(logItems.slice(-300))); } catch (e) {} }
+function addLog(dur, ok, why) {
+  logItems.push({ t: hhmmss(), k: ok ? 'ok' : 'ko', txt: ok ? ('✓ n°' + count + ' — bloc ' + dur + ' ms') : ('✗ ignoré — bloc ' + dur + ' ms (' + why + ')') });
+  if (logItems.length > 300) logItems.shift();
+  saveLog();
+  if (S.debug) renderLog();
+}
+function logEvent(txt) {
+  logItems.push({ t: hhmmss(), k: 'ev', txt: '• ' + txt });
+  if (logItems.length > 300) logItems.shift();
+  saveLog();
+  if (S.debug) renderLog();
+}
+function renderLog() {
+  const box = $('log');
+  box.textContent = '';
+  logItems.slice(-80).reverse().forEach(it => {
+    const d = document.createElement('div');
+    d.className = it.k;
+    d.textContent = it.t + '  ' + it.txt;
+    box.appendChild(d);
+  });
+}
+function updateMicInfo() {
+  const t = micTrack();
+  if (!t || !t.getSettings) { $('dMic').textContent = '–'; return; }
+  const s = t.getSettings();
+  const f = v => v === true ? 'oui' : v === false ? 'non' : 'non supporté';
+  $('dMic').textContent = 'écho ' + f(s.echoCancellation) + ' · bruit ' + f(s.noiseSuppression) + ' · gain ' + f(s.autoGainControl);
+}
+function renderDebugLive(now) {
+  $('dLevel').textContent = (analyser ? Math.round(levelDb) : '–') + ' dB';
+  $('dThr').textContent = S.threshold + ' dB';
+  $('dState').textContent = !running ? 'arrêté' : now < muteUntil ? 'pause (son app)' : inVoice ? ('voix ' + Math.round(now - voiceStart) + ' ms') : 'silence';
+  $('dWake').textContent = wakeLock ? 'maintenu' : 'non maintenu';
+  drawGraph();
+}
+function drawGraph() {
+  const c = $('graph');
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  if (!w) return;
+  if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const n = 320, dx = w / n, off = n - history.length;
+  const y = db => h - (pct(db) / 100) * h;
+  history.forEach((p, i) => {
+    const x = (i + off) * dx;
+    if (p.m) { g.fillStyle = 'rgba(255,176,32,0.18)'; g.fillRect(x, 0, dx + 0.5, h); }
+    else if (p.v) { g.fillStyle = 'rgba(47,211,111,0.18)'; g.fillRect(x, 0, dx + 0.5, h); }
+    if (p.c) { g.fillStyle = '#fff'; g.fillRect(x, 0, 2, h); }
+  });
+  g.strokeStyle = '#ddd'; g.lineWidth = 1.5; g.beginPath();
+  history.forEach((p, i) => { const x = (i + off) * dx; i ? g.lineTo(x, y(p.db)) : g.moveTo(x, y(p.db)); });
+  g.stroke();
+  g.strokeStyle = '#ff5a5a'; g.setLineDash([4, 4]); g.beginPath();
+  g.moveTo(0, y(S.threshold)); g.lineTo(w, y(S.threshold)); g.stroke(); g.setLineDash([]);
+}
+function logAsText() {
+  const head = 'Réglages : seuil ' + S.threshold + ' dB, min ' + S.minVoice + ' ms, silence ' + S.silence + ' ms, max ' + S.maxVoice +
+    ' ms, écho ' + S.echo + ', bruit ' + S.noise + ', gain ' + S.agc + ', mode ' + S.mode + '\nMicro réel : ' + $('dMic').textContent + '\n\n';
+  return head + logItems.map(i => i.t + '  ' + i.txt).join('\n');
+}
+
+/* =====================================================================
+   11. ÉCRAN DE RÉGLAGES
+   ===================================================================== */
+const FIELDS = {
+  goal: 'int', threshold: 'int', calibMargin: 'int', minVoice: 'int', silence: 'int', maxVoice: 'int',
+  echo: 'bool', noise: 'bool', agc: 'bool',
+  beep1: 'int', beep2: 'int', beep3: 'int', voiceStep: 'int',
+  volume: 'float', tick: 'bool', debug: 'bool'
+};
+const FMT = {
+  threshold: v => v + ' dB', calibMargin: v => '+' + v + ' dB',
+  minVoice: v => v + ' ms', silence: v => v + ' ms', maxVoice: v => (v / 1000).toFixed(1).replace('.', ',') + ' s',
+  volume: v => Math.round(v * 100) + ' %'
+};
+function syncSettingsUI() {
+  for (const k in FIELDS) {
+    const el = $('set-' + k); if (!el) continue;
+    if (FIELDS[k] === 'bool') el.checked = !!S[k]; else el.value = S[k];
+    const out = $('val-' + k); if (out) out.textContent = FMT[k](S[k]);
+  }
+  document.querySelectorAll('input[name=mode]').forEach(r => r.checked = r.value === S.mode);
+  $('beepOpts').hidden = S.mode !== 'beep';
+  $('voiceOpts').hidden = S.mode !== 'voice';
+  document.querySelectorAll('#goalChips button').forEach(b => b.classList.toggle('sel', +b.dataset.goal === S.goal));
+}
+function onField(k) {
+  const el = $('set-' + k), type = FIELDS[k];
+  let v;
+  if (type === 'bool') v = el.checked;
+  else if (type === 'float') v = parseFloat(el.value);
+  else v = parseInt(el.value, 10);
+  if (type !== 'bool' && !Number.isFinite(v)) return;
+  if (['goal', 'beep1', 'beep2', 'beep3', 'voiceStep'].includes(k)) v = Math.max(1, v);
+  S[k] = v; save();
+  const out = $('val-' + k); if (out) out.textContent = FMT[k](v);
+  if (['echo', 'noise', 'agc'].includes(k) && stream) {
+    startMic().then(() => logEvent('Micro relancé (écho ' + S.echo + ', bruit ' + S.noise + ', gain ' + S.agc + ')'))
+              .catch(e => { pause(); showNotice(micErrorMessage(e)); });
+  }
+  syncSettingsUI(); renderAll();
+}
+for (const k in FIELDS) {
+  const el = $('set-' + k); if (!el) continue;
+  el.addEventListener(FIELDS[k] === 'bool' ? 'change' : 'input', () => onField(k));
+}
+document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', () => { S.mode = r.value; save(); syncSettingsUI(); }));
+document.querySelectorAll('#goalChips button').forEach(b => b.addEventListener('click', () => { S.goal = +b.dataset.goal; save(); syncSettingsUI(); renderAll(); }));
+
+function fillVoices() {
+  if (!('speechSynthesis' in window)) return;
+  const sel = $('voiceSelect');
+  const vs = speechSynthesis.getVoices().filter(v => /^fr/i.test(v.lang));
+  sel.textContent = '';
+  const auto = document.createElement('option'); auto.value = ''; auto.textContent = 'Automatique (français)'; sel.appendChild(auto);
+  vs.forEach(v => { const o = document.createElement('option'); o.value = v.voiceURI; o.textContent = v.name + ' (' + v.lang + ')'; sel.appendChild(o); });
+  sel.value = vs.some(v => v.voiceURI === S.voiceURI) ? S.voiceURI : '';
+}
+if ('speechSynthesis' in window) { fillVoices(); speechSynthesis.onvoiceschanged = fillVoices; }
+$('voiceSelect').addEventListener('change', e => { S.voiceURI = e.target.value; save(); });
+
+/* =====================================================================
+   12. BOUTONS
+   ===================================================================== */
+$('btnStart').addEventListener('click', () => running ? pause() : start());
+$('btnPlus').addEventListener('click', async () => { await ensureContext(); increment(); logEvent('+1 à la main → ' + count); });
+$('btnMinus').addEventListener('click', () => { setCount(count - 1); logEvent('−1 à la main → ' + count); });
+$('btnReset').addEventListener('click', () => { if (confirm('Remettre le compteur à zéro ?')) { setCount(0); logEvent('Remise à zéro'); } });
+$('btnSettings').addEventListener('click', () => { syncSettingsUI(); fillVoices(); $('settings').hidden = false; });
+$('btnClose').addEventListener('click', () => { $('settings').hidden = true; renderAll(); });
+$('btnApplyStart').addEventListener('click', () => {
+  const v = parseInt($('startValue').value, 10);
+  if (!Number.isFinite(v) || v < 0) return;
+  setCount(v); logEvent('Point de départ : ' + v);
+  $('startValue').value = ''; $('settings').hidden = true; renderAll();
+});
+$('btnCalibrate').addEventListener('click', calibrate);
+$('btnTestStep').addEventListener('click', async () => {
+  await ensureContext(); primeSpeech();
+  if (S.mode === 'voice') speak(String(S.voiceStep)); else beeps(1);
+});
+$('btnTestGoal').addEventListener('click', async () => {
+  await ensureContext(); primeSpeech();
+  const ms = goalSignal();
+  if (S.mode === 'voice') setTimeout(() => speak('Objectif atteint. ' + S.goal), ms);
+});
+$('notice').addEventListener('click', hideNotice);
+$('btnClearLog').addEventListener('click', () => { if (confirm('Effacer le journal ?')) { logItems = []; saveLog(); renderLog(); } });
+$('btnCopyLog').addEventListener('click', async () => {
+  const txt = logAsText();
+  try { await navigator.clipboard.writeText(txt); showNotice('Journal copié. Collez-le dans un message.'); }
+  catch (e) {
+    const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta);
+    ta.select(); try { document.execCommand('copy'); showNotice('Journal copié.'); } catch (e2) {}
+    ta.remove();
+  }
+});
+window.addEventListener('resize', () => { if (S.debug) drawGraph(); });
+
+/* =====================================================================
+   13. DÉMARRAGE DE LA PAGE
+   ===================================================================== */
+syncSettingsUI();
+renderAll();
+if (!timer) timer = setInterval(tick, 25);
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
