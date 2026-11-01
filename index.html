@@ -80,6 +80,19 @@
   #progressFill.done { background: var(--gold); }
   .dhikr { margin-top: 14px; text-align: center; color: #777; font-size: 20px; line-height: 1.4; }
   .dhikr small { font-size: 13px; }
+  .dhikr { max-width: 95%; }
+
+  /* Onglets des 3 dhikr */
+  .tabs { display: flex; gap: 8px; }
+  .tab {
+    flex: 1; min-width: 0; height: 58px; border-radius: 14px;
+    background: var(--panel); border: 1px solid var(--line);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  }
+  .tab b { font-size: 15px; }
+  .tab span { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .tab.sel { border-color: var(--green); background: #0d2a18; }
+  .tab.done span { color: var(--gold); }
   /* En mode test, on laisse de la place au journal */
   #main.debug-on #count { font-size: min(30vw, 15vh); }
   #main.debug-on #count.d4, #main.debug-on #count.d5 { font-size: min(20vw, 12vh); }
@@ -155,11 +168,12 @@
 
   /* Téléphone à l'horizontale sur le support */
   @media (orientation: landscape) and (max-height: 600px) {
-    #main { display: grid; grid-template-columns: 1fr minmax(260px, 38%); grid-template-rows: auto 1fr auto; column-gap: 20px; }
-    .top { grid-column: 1 / -1; }
-    .counter { grid-column: 1; grid-row: 2 / 4; }
-    #debug { grid-column: 2; grid-row: 2; max-height: none; }
-    .controls { grid-column: 2; grid-row: 3; align-self: end; }
+    #main { display: grid; grid-template-columns: 1fr minmax(260px, 38%); grid-template-rows: auto auto 1fr auto; column-gap: 20px; }
+    .top, .tabs { grid-column: 1 / -1; }
+    .tab { height: 46px; }
+    .counter { grid-column: 1; grid-row: 3 / 5; }
+    #debug { grid-column: 2; grid-row: 3; max-height: none; }
+    .controls { grid-column: 2; grid-row: 4; align-self: end; }
     #count { font-size: min(30vw, 52vh); }
     #count.d3 { font-size: min(24vw, 46vh); }
     #count.d4 { font-size: min(18vw, 40vh); }
@@ -184,11 +198,13 @@
     </button>
   </header>
 
+  <nav class="tabs" id="tabs" aria-label="Choix du dhikr"></nav>
+
   <section class="counter">
     <div id="count">0</div>
     <div class="goal" id="goalText">/ 100</div>
     <div class="progress"><div id="progressFill"></div></div>
-    <div class="dhikr">أستغفر الله وأتوب إليه<br><small>Astaghfirullah wa atubu ilayh</small></div>
+    <div class="dhikr"><span id="dhikrAr" dir="rtl"></span><br><small id="dhikrLat"></small></div>
   </section>
 
   <section id="debug" hidden>
@@ -228,22 +244,24 @@
   </div>
 
   <div class="card">
-    <h2>Objectif</h2>
+    <h2>Objectifs</h2>
     <p class="hint">Un signal spécial retentit à l'objectif (et à chaque multiple). Le compteur continue ensuite.</p>
-    <div class="chips" id="goalChips">
-      <button data-goal="33">33</button><button data-goal="50">50</button><button data-goal="99">99</button>
-      <button data-goal="100">100</button><button data-goal="300">300</button><button data-goal="1000">1000</button>
+    <div class="grid3">
+      <div><small>Istighfar</small><input type="number" id="goal-istighfar" min="1" inputmode="numeric"></div>
+      <div><small>Tahlil</small><input type="number" id="goal-tahlil" min="1" inputmode="numeric"></div>
+      <div><small>Salât</small><input type="number" id="goal-salat" min="1" inputmode="numeric"></div>
     </div>
-    <input type="number" id="set-goal" min="1" inputmode="numeric">
+    <label class="check" style="margin-top:8px">Mode Rythme : passer tout seul au dhikr suivant à l'objectif <input type="checkbox" id="set-autoNext"></label>
   </div>
 
   <div class="card">
     <h2>Point de départ</h2>
-    <p class="hint">Si vous en avez déjà fait à la main, entrez le nombre et touchez « Appliquer ».</p>
+    <p class="hint">Pour le dhikr affiché (onglet sélectionné) : si vous en avez déjà fait à la main, entrez le nombre et touchez « Appliquer ».</p>
     <div class="inline">
       <input type="number" id="startValue" min="0" inputmode="numeric" placeholder="ex. 50">
       <button id="btnApplyStart" class="btn">Appliquer</button>
     </div>
+    <button id="btnResetAll" class="btn" style="width:100%;margin-top:10px">Remettre les 3 compteurs à zéro</button>
   </div>
 
   <div class="card">
@@ -352,7 +370,7 @@
     <label class="check">Afficher l'écran de test (niveau, seuil, journal) <input type="checkbox" id="set-debug"></label>
   </div>
 
-  <div class="version">Prototype v0.2 — un seul dhikr : Astaghfirullah wa atubu ilayh</div>
+  <div class="version">Prototype v0.3 — 3 dhikr : Istighfar, Tahlil, Salât</div>
 </div>
 
 <script>
@@ -364,7 +382,8 @@
 const DEFAULTS = {
   method: 'text',     // 'text' = reconnaît les mots, 'rhythm' = rythme de la voix
   lang: 'ar-SA',      // langue de la reconnaissance du texte
-  goal: 100,
+  goals: { istighfar: 100, tahlil: 100, salat: 100 },
+  autoNext: true,     // mode Rythme : passe au dhikr suivant quand l'objectif est atteint
   threshold: -50,     // seuil en dB : au-dessus = "voix"
   calibMargin: 8,     // marge ajoutée au bruit mesuré lors de la calibration
   minVoice: 700,      // ms : durée minimale d'une récitation
@@ -381,17 +400,46 @@ const DEFAULTS = {
 const KEY = 'dhikr-proto-v1';
 const LOGKEY = 'dhikr-proto-log-v1';
 
+/* Les 3 dhikr. « keys » = mots repérés dans le texte transcrit (en arabe simplifié, ou en lettres latines
+   si la reconnaissance est en français). On compte le mot le plus souvent trouvé : si l'iPhone en rate un,
+   un autre rattrape. */
+const DHIKRS = [
+  { id: 'istighfar', name: 'Istighfar',
+    ar: 'أستغفر الله وأتوب إليه',
+    lat: 'Astaghfirullah wa atubu ilayh',
+    keys: [/استغفر|sta?g?h?f[iea]r/g, /اتوب|atou?b|atoob/g] },
+  { id: 'tahlil', name: 'Tahlil',
+    ar: 'لا إله إلا الله وحده لا شريك له، له الملك وله الحمد، وهو على كل شيء قدير',
+    lat: 'Lā ilāha illā-llāh, waḥdahu lā sharīka lah, lahu-l-mulk wa lahu-l-ḥamd, wa huwa ʿalā kulli shayʾin qadīr',
+    keys: [/شريك|chari?k|shari?k/g, /قدير|qadir|kadir/g, /الملك|mou?lk|mulk/g] },
+  { id: 'salat', name: 'Salât',
+    ar: 'اللَّهُمَّ صَلِّ وَسَلِّمْ عَلَى نَبِيِّنَا مُحَمَّدٍ',
+    lat: 'Allāhumma ṣalli wa sallim ʿalā nabiyyinā Muḥammad',
+    keys: [/محمد|mou?hammad|muhammad/g, /نبينا|nabiy+ina/g, /سلم|sallim/g] }
+];
+const D = id => DHIKRS.find(d => d.id === id);
+
 function loadState() {
+  const zero = () => ({ istighfar: 0, tahlil: 0, salat: 0 });
   try {
     const d = JSON.parse(localStorage.getItem(KEY) || 'null');
-    if (d) return { S: Object.assign({}, DEFAULTS, d.settings), count: Number.isFinite(d.count) ? d.count : 0 };
+    if (d) {
+      const S = Object.assign({}, DEFAULTS, d.settings);
+      S.goals = Object.assign({}, DEFAULTS.goals, d.settings && d.settings.goals);
+      if (d.settings && d.settings.goal && !(d.settings.goals)) S.goals.istighfar = d.settings.goal;  // ancienne version
+      delete S.goal;
+      const counts = Object.assign(zero(), d.counts);
+      if (!d.counts && Number.isFinite(d.count)) counts.istighfar = d.count;                       // ancienne version
+      return { S, counts, cur: D(d.cur) ? d.cur : 'istighfar' };
+    }
   } catch (e) {}
-  return { S: Object.assign({}, DEFAULTS), count: 0 };
+  return { S: Object.assign({}, DEFAULTS, { goals: Object.assign({}, DEFAULTS.goals) }), counts: zero(), cur: 'istighfar' };
 }
-let { S, count } = loadState();
+let { S, counts, cur } = loadState();
 function save() {
-  try { localStorage.setItem(KEY, JSON.stringify({ settings: S, count })); } catch (e) {}
+  try { localStorage.setItem(KEY, JSON.stringify({ settings: S, counts, cur })); } catch (e) {}
 }
+const goalOf = id => S.goals[id] || 0;
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -496,8 +544,9 @@ function detect(now) {
   const dur = Math.round(lastAbove - voiceStart);
   if (dur < S.minVoice) { if (dur >= 120) addLog(dur, false, 'trop court'); return false; }
   if (dur > S.maxVoice) { addLog(dur, false, 'trop long'); return false; }
-  increment();
-  addLog(dur, true);
+  const id = cur;
+  increment(id);
+  addLog(dur, true, '', id);
   return true;
 }
 
@@ -505,18 +554,17 @@ function detect(now) {
    3 bis. DÉTECTION PAR LE TEXTE (reconnaissance vocale de l'iPhone)
    ===================================================================== */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, recMax = 0, recLastLen = 0, heard = '', speaking = false;
+let rec = null, recMax = {}, recLastLen = 0, heard = '', speaking = false;
 
 // Simplifie l'arabe : enlève les voyelles courtes et unifie les alif, pour comparer plus facilement.
 function norm(s) {
   return s.toLowerCase().replace(/[ً-ٰٟـ]/g, '').replace(/[أإآٱ]/g, 'ا');
 }
-// Nombre de dhikr dans un texte : on compte « استغفر » et « اتوب », et on garde le plus grand
-// (si l'iPhone rate un des deux mots dans une répétition, l'autre la rattrape).
-function countDhikr(t) {
+// Nombre de fois qu'un dhikr apparaît dans un texte : on compte chacun de ses mots-clés
+// et on garde le plus grand (si l'iPhone rate un mot dans une répétition, un autre la rattrape).
+function countDhikr(t, d) {
   const n = norm(t);
-  const c = re => (n.match(re) || []).length;
-  return Math.max(c(/استغفر/g) + c(/sta?g?h?f[iea]r/g), c(/اتوب/g) + c(/atou?b|atoob/g));
+  return Math.max(...d.keys.map(re => (n.match(re) || []).length));
 }
 
 function startText() {
@@ -527,21 +575,25 @@ function startText() {
   r.continuous = true;
   r.interimResults = true;
   r.maxAlternatives = 1;
-  recMax = 0; recLastLen = 0;
+  recMax = {}; recLastLen = 0;
   r.onresult = e => {
     let t = '';
     for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript + ' ';
     t = t.trim();
     heard = t;
-    let n = countDhikr(t);
+    const ns = DHIKRS.map(d => countDhikr(t, d));
+    const already = DHIKRS.reduce((s, d) => s + (recMax[d.id] || 0), 0);
     // Si l'iPhone repart sur une nouvelle phrase (texte qui rétrécit), on repart de zéro pour cette phrase.
-    if (n < recMax && t.length < recLastLen * 0.5) { recMax = 0; }
+    if (ns.reduce((a, b) => a + b, 0) < already && t.length < recLastLen * 0.5) recMax = {};
     recLastLen = t.length;
-    while (n > recMax) {
-      recMax++;
-      increment();
-      addTextLog(t);
-    }
+    // Chaque dhikr reconnu va dans son propre compteur.
+    DHIKRS.forEach((d, i) => {
+      while (ns[i] > (recMax[d.id] || 0)) {
+        recMax[d.id] = (recMax[d.id] || 0) + 1;
+        increment(d.id);
+        addTextLog(t, d.id);
+      }
+    });
     if (S.debug) $('dHeard').textContent = t.slice(-90) || '–';
   };
   r.onspeechstart = () => { speaking = true; };
@@ -575,8 +627,8 @@ function stopText() {
   try { r.abort(); } catch (e) {}
   speaking = false;
 }
-function addTextLog(t) {
-  logItems.push({ t: hhmmss(), k: 'ok', txt: '✓ n°' + count + ' — « …' + t.slice(-40) + ' »' });
+function addTextLog(t, id) {
+  logItems.push({ t: hhmmss(), k: 'ok', txt: '✓ ' + D(id).name + ' n°' + counts[id] + ' — « …' + t.slice(-40) + ' »' });
   if (logItems.length > 300) logItems.shift();
   saveLog();
   if (S.debug) renderLog();
@@ -585,14 +637,24 @@ function addTextLog(t) {
 /* =====================================================================
    4. COMPTEUR
    ===================================================================== */
-function setCount(n) { count = Math.max(0, Math.round(n)); save(); renderCount(); }
-function increment() {
-  setCount(count + 1);
+function setCount(n, id = cur) { counts[id] = Math.max(0, Math.round(n)); save(); renderCount(); }
+function increment(id = cur) {
+  cur = id;                                   // l'écran affiche le dhikr qui vient d'être compté
+  setCount(counts[id] + 1, id);
   const el = $('count');
   el.classList.add('bump'); setTimeout(() => el.classList.remove('bump'), 160);
-  feedback(count);
+  feedback(counts[id], id);
+  // Mode Rythme : l'app ne comprend pas les mots, donc à l'objectif elle passe au dhikr suivant.
+  if (S.method === 'rhythm' && S.autoNext && counts[id] === goalOf(id)) {
+    const i = DHIKRS.findIndex(d => d.id === id);
+    if (i < DHIKRS.length - 1) {
+      cur = DHIKRS[i + 1].id; save();
+      logEvent('→ Dhikr suivant : ' + D(cur).name);
+      renderCount();
+    }
+  }
 }
-function isGoal(n) { return S.goal > 0 && n >= S.goal && n % S.goal === 0; }
+function isGoal(n, id) { const g = goalOf(id); return g > 0 && n >= g && n % g === 0; }
 
 /* =====================================================================
    5. SONS : BIPS, VOIX, SIGNAL D'OBJECTIF
@@ -654,8 +716,8 @@ function primeSpeech() {
   speechSynthesis.speak(u);
 }
 
-function feedback(n) {
-  const goal = isGoal(n);
+function feedback(n, id) {
+  const goal = isGoal(n, id);
   if (S.mode === 'voice') {
     if (goal) {
       const ms = goalSignal();
@@ -785,15 +847,38 @@ const pct = db => clamp((db - DB_MIN) / (DB_MAX - DB_MIN), 0, 1) * 100;
 
 function renderCount() {
   const el = $('count');
-  el.textContent = count;
-  const d = String(count).length;
+  const n = counts[cur], g = goalOf(cur);
+  el.textContent = n;
+  const d = String(n).length;
   el.className = d >= 5 ? 'd5' : d === 4 ? 'd4' : d === 3 ? 'd3' : '';
-  const reached = S.goal > 0 && count >= S.goal;
+  const reached = g > 0 && n >= g;
   el.classList.toggle('done', reached);
-  $('goalText').textContent = '/ ' + S.goal;
-  const p = S.goal > 0 ? (reached ? 100 : (count / S.goal) * 100) : 0;
+  $('goalText').textContent = '/ ' + g;
+  const p = g > 0 ? (reached ? 100 : (n / g) * 100) : 0;
   $('progressFill').style.width = p + '%';
   $('progressFill').classList.toggle('done', reached);
+  $('dhikrAr').textContent = D(cur).ar;
+  $('dhikrLat').textContent = D(cur).lat;
+  renderTabs();
+}
+function renderTabs() {
+  const nav = $('tabs');
+  if (!nav.children.length) {
+    DHIKRS.forEach(d => {
+      const b = document.createElement('button');
+      b.className = 'tab'; b.dataset.id = d.id;
+      b.innerHTML = '<b></b><span></span>';
+      b.querySelector('b').textContent = d.name;
+      b.addEventListener('click', () => { cur = d.id; save(); logEvent('Onglet : ' + d.name); renderAll(); });
+      nav.appendChild(b);
+    });
+  }
+  [...nav.children].forEach(b => {
+    const id = b.dataset.id, n = counts[id], g = goalOf(id);
+    b.querySelector('span').textContent = n + ' / ' + g;
+    b.classList.toggle('sel', id === cur);
+    b.classList.toggle('done', g > 0 && n >= g);
+  });
 }
 function renderStatus() {
   const pill = $('status');
@@ -846,8 +931,8 @@ let logItems = [];
 try { logItems = JSON.parse(localStorage.getItem(LOGKEY) || '[]'); } catch (e) {}
 function hhmmss() { return new Date().toLocaleTimeString('fr-FR'); }
 function saveLog() { try { localStorage.setItem(LOGKEY, JSON.stringify(logItems.slice(-300))); } catch (e) {} }
-function addLog(dur, ok, why) {
-  logItems.push({ t: hhmmss(), k: ok ? 'ok' : 'ko', txt: ok ? ('✓ n°' + count + ' — bloc ' + dur + ' ms') : ('✗ ignoré — bloc ' + dur + ' ms (' + why + ')') });
+function addLog(dur, ok, why, id) {
+  logItems.push({ t: hhmmss(), k: ok ? 'ok' : 'ko', txt: ok ? ('✓ ' + D(id).name + ' n°' + counts[id] + ' — bloc ' + dur + ' ms') : ('✗ ignoré — bloc ' + dur + ' ms (' + why + ')') });
   if (logItems.length > 300) logItems.shift();
   saveLog();
   if (S.debug) renderLog();
@@ -915,7 +1000,7 @@ function logAsText() {
    11. ÉCRAN DE RÉGLAGES
    ===================================================================== */
 const FIELDS = {
-  goal: 'int', threshold: 'int', calibMargin: 'int', minVoice: 'int', silence: 'int', maxVoice: 'int',
+  autoNext: 'bool', threshold: 'int', calibMargin: 'int', minVoice: 'int', silence: 'int', maxVoice: 'int',
   echo: 'bool', noise: 'bool', agc: 'bool',
   beep1: 'int', beep2: 'int', beep3: 'int', voiceStep: 'int',
   volume: 'float', tick: 'bool', debug: 'bool', lang: 'str'
@@ -937,12 +1022,12 @@ function syncSettingsUI() {
   $('rhythmOpts').hidden = S.method !== 'rhythm';
   $('micOpts').hidden = S.method !== 'rhythm';
   $('methodHint').textContent = S.method === 'text'
-    ? (SR ? "L'iPhone transcrit ce que vous dites et compte chaque « أستغفر » (ou « أتوب ») reconnu. Conseil : retour sonore en Bips (la voix peut couper la reconnaissance)."
+    ? (SR ? "L'iPhone transcrit ce que vous dites et reconnaît lequel des 3 dhikr vous récitez : chacun va dans son compteur, l'écran suit tout seul. Conseil : retour sonore en Bips (la voix peut couper la reconnaissance)."
           : "⚠ Ce navigateur ne propose pas la reconnaissance du texte : choisissez « Rythme ».")
-    : "Compte chaque bloc de voix suivi d'un silence, sans comprendre les mots.";
+    : "Compte chaque bloc de voix suivi d'un silence, sans comprendre les mots : il compte le dhikr affiché.";
   $('beepOpts').hidden = S.mode !== 'beep';
   $('voiceOpts').hidden = S.mode !== 'voice';
-  document.querySelectorAll('#goalChips button').forEach(b => b.classList.toggle('sel', +b.dataset.goal === S.goal));
+  DHIKRS.forEach(d => { $('goal-' + d.id).value = goalOf(d.id); });
 }
 function onField(k) {
   const el = $('set-' + k), type = FIELDS[k];
@@ -953,7 +1038,7 @@ function onField(k) {
   else v = parseInt(el.value, 10);
   if (type !== 'bool' && type !== 'str' && !Number.isFinite(v)) return;
   if (k === 'lang' && running) { S.lang = v; save(); pause(); showNotice('Langue changée. Touchez « Démarrer » pour reprendre.'); }
-  if (['goal', 'beep1', 'beep2', 'beep3', 'voiceStep'].includes(k)) v = Math.max(1, v);
+  if (['beep1', 'beep2', 'beep3', 'voiceStep'].includes(k)) v = Math.max(1, v);
   S[k] = v; save();
   const out = $('val-' + k); if (out) out.textContent = FMT[k](v);
   if (['echo', 'noise', 'agc'].includes(k) && stream) {
@@ -971,7 +1056,11 @@ document.querySelectorAll('input[name=method]').forEach(r => r.addEventListener(
   S.method = r.value; save(); syncSettingsUI(); renderAll();
 }));
 document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', () => { S.mode = r.value; save(); syncSettingsUI(); }));
-document.querySelectorAll('#goalChips button').forEach(b => b.addEventListener('click', () => { S.goal = +b.dataset.goal; save(); syncSettingsUI(); renderAll(); }));
+DHIKRS.forEach(d => $('goal-' + d.id).addEventListener('input', e => {
+  const v = parseInt(e.target.value, 10);
+  if (!Number.isFinite(v) || v < 1) return;
+  S.goals[d.id] = v; save(); renderAll();
+}));
 
 function fillVoices() {
   if (!('speechSynthesis' in window)) return;
@@ -989,15 +1078,21 @@ $('voiceSelect').addEventListener('change', e => { S.voiceURI = e.target.value; 
    12. BOUTONS
    ===================================================================== */
 $('btnStart').addEventListener('click', () => running ? pause() : start());
-$('btnPlus').addEventListener('click', async () => { await ensureContext(); increment(); logEvent('+1 à la main → ' + count); });
-$('btnMinus').addEventListener('click', () => { setCount(count - 1); logEvent('−1 à la main → ' + count); });
-$('btnReset').addEventListener('click', () => { if (confirm('Remettre le compteur à zéro ?')) { setCount(0); logEvent('Remise à zéro'); } });
+$('btnPlus').addEventListener('click', async () => { const id = cur; await ensureContext(); increment(id); logEvent('+1 à la main → ' + D(id).name + ' ' + counts[id]); });
+$('btnMinus').addEventListener('click', () => { setCount(counts[cur] - 1); logEvent('−1 à la main → ' + D(cur).name + ' ' + counts[cur]); });
+$('btnReset').addEventListener('click', () => { if (confirm('Remettre « ' + D(cur).name + ' » à zéro ?')) { setCount(0); logEvent('Remise à zéro : ' + D(cur).name); } });
+$('btnResetAll').addEventListener('click', () => {
+  if (!confirm('Remettre les 3 compteurs à zéro ?')) return;
+  DHIKRS.forEach(d => { counts[d.id] = 0; });
+  cur = DHIKRS[0].id; save(); logEvent('Remise à zéro des 3 compteurs');
+  $('settings').hidden = true; renderAll();
+});
 $('btnSettings').addEventListener('click', () => { syncSettingsUI(); fillVoices(); $('settings').hidden = false; });
 $('btnClose').addEventListener('click', () => { $('settings').hidden = true; renderAll(); });
 $('btnApplyStart').addEventListener('click', () => {
   const v = parseInt($('startValue').value, 10);
   if (!Number.isFinite(v) || v < 0) return;
-  setCount(v); logEvent('Point de départ : ' + v);
+  setCount(v); logEvent('Point de départ : ' + D(cur).name + ' ' + v);
   $('startValue').value = ''; $('settings').hidden = true; renderAll();
 });
 $('btnCalibrate').addEventListener('click', calibrate);
@@ -1008,7 +1103,7 @@ $('btnTestStep').addEventListener('click', async () => {
 $('btnTestGoal').addEventListener('click', async () => {
   await ensureContext(); primeSpeech();
   const ms = goalSignal();
-  if (S.mode === 'voice') setTimeout(() => speak('Objectif atteint. ' + S.goal), ms);
+  if (S.mode === 'voice') setTimeout(() => speak('Objectif atteint. ' + goalOf(cur)), ms);
 });
 $('notice').addEventListener('click', hideNotice);
 $('btnClearLog').addEventListener('click', () => { if (confirm('Effacer le journal ?')) { logItems = []; saveLog(); renderLog(); } });
