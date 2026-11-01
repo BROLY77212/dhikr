@@ -198,6 +198,7 @@
       <div><span>État :</span> <b id="dState">–</b></div>
       <div><span>Écran :</span> <b id="dWake">–</b></div>
       <div style="grid-column:1/-1"><span>Micro :</span> <b id="dMic">–</b></div>
+      <div style="grid-column:1/-1"><span>Entendu :</span> <b id="dHeard" dir="auto">–</b></div>
     </div>
     <canvas id="graph"></canvas>
     <div id="log"></div>
@@ -246,7 +247,29 @@
   </div>
 
   <div class="card">
-    <h2>Détection de la voix</h2>
+    <h2>Méthode de détection</h2>
+    <div class="seg">
+      <label><input type="radio" name="method" value="text"> Texte</label>
+      <label><input type="radio" name="method" value="rhythm"> Rythme</label>
+    </div>
+    <p class="hint" id="methodHint"></p>
+    <div id="textOpts">
+      <div class="field">
+        <div class="lab">Langue de reconnaissance</div>
+        <select id="set-lang">
+          <option value="ar-SA">Arabe (Arabie saoudite)</option>
+          <option value="ar-AE">Arabe (Émirats)</option>
+          <option value="ar-EG">Arabe (Égypte)</option>
+          <option value="ar-MA">Arabe (Maroc)</option>
+          <option value="fr-FR">Français (si l'arabe ne marche pas)</option>
+        </select>
+        <p class="hint">Si l'iPhone comprend mal, essayez une autre langue et comparez dans le mode test (ligne « Entendu »).</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="rhythmOpts">
+    <h2>Détection au rythme de la voix</h2>
     <p class="hint">Faites la calibration voiture à l'arrêt, moteur allumé, sans parler pendant 3 secondes.</p>
     <button id="btnCalibrate" class="btn primary">Calibrer (3 s de silence)</button>
     <div id="calibInfo"></div>
@@ -278,7 +301,7 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="micOpts">
     <h2>Micro (traitement du son)</h2>
     <p class="hint">À tester en voiture : activez/désactivez et comparez dans le mode test. Le micro redémarre à chaque changement.</p>
     <label class="check">Annulation d'écho <input type="checkbox" id="set-echo"></label>
@@ -329,7 +352,7 @@
     <label class="check">Afficher l'écran de test (niveau, seuil, journal) <input type="checkbox" id="set-debug"></label>
   </div>
 
-  <div class="version">Prototype v0.1 — un seul dhikr : Astaghfirullah wa atubu ilayh</div>
+  <div class="version">Prototype v0.2 — un seul dhikr : Astaghfirullah wa atubu ilayh</div>
 </div>
 
 <script>
@@ -339,6 +362,8 @@
    1. RÉGLAGES PAR DÉFAUT ET SAUVEGARDE
    ===================================================================== */
 const DEFAULTS = {
+  method: 'text',     // 'text' = reconnaît les mots, 'rhythm' = rythme de la voix
+  lang: 'ar-SA',      // langue de la reconnaissance du texte
   goal: 100,
   threshold: -50,     // seuil en dB : au-dessus = "voix"
   calibMargin: 8,     // marge ajoutée au bruit mesuré lors de la calibration
@@ -477,6 +502,87 @@ function detect(now) {
 }
 
 /* =====================================================================
+   3 bis. DÉTECTION PAR LE TEXTE (reconnaissance vocale de l'iPhone)
+   ===================================================================== */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, recMax = 0, recLastLen = 0, heard = '', speaking = false;
+
+// Simplifie l'arabe : enlève les voyelles courtes et unifie les alif, pour comparer plus facilement.
+function norm(s) {
+  return s.toLowerCase().replace(/[ً-ٰٟـ]/g, '').replace(/[أإآٱ]/g, 'ا');
+}
+// Nombre de dhikr dans un texte : on compte « استغفر » et « اتوب », et on garde le plus grand
+// (si l'iPhone rate un des deux mots dans une répétition, l'autre la rattrape).
+function countDhikr(t) {
+  const n = norm(t);
+  const c = re => (n.match(re) || []).length;
+  return Math.max(c(/استغفر/g) + c(/sta?g?h?f[iea]r/g), c(/اتوب/g) + c(/atou?b|atoob/g));
+}
+
+function startText() {
+  if (!SR) { const e = new Error('nosr'); e.name = 'NoSR'; throw e; }
+  stopText();
+  const r = new SR();
+  r.lang = S.lang;
+  r.continuous = true;
+  r.interimResults = true;
+  r.maxAlternatives = 1;
+  recMax = 0; recLastLen = 0;
+  r.onresult = e => {
+    let t = '';
+    for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript + ' ';
+    t = t.trim();
+    heard = t;
+    let n = countDhikr(t);
+    // Si l'iPhone repart sur une nouvelle phrase (texte qui rétrécit), on repart de zéro pour cette phrase.
+    if (n < recMax && t.length < recLastLen * 0.5) { recMax = 0; }
+    recLastLen = t.length;
+    while (n > recMax) {
+      recMax++;
+      increment();
+      addTextLog(t);
+    }
+    if (S.debug) $('dHeard').textContent = t.slice(-90) || '–';
+  };
+  r.onspeechstart = () => { speaking = true; };
+  r.onspeechend = () => { speaking = false; };
+  r.onerror = e => {
+    logEvent('Reconnaissance : erreur « ' + e.error + ' »');
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      pause();
+      showNotice("La reconnaissance vocale est refusée.<b>Réglages de l'iPhone › Général › Clavier › activez « Dictée », et autorisez le micro et la reconnaissance vocale pour Safari.</b>");
+    }
+  };
+  r.onend = () => {
+    speaking = false;
+    if (rec !== r) return;
+    rec = null;
+    logEvent('Reconnaissance : session terminée, relance');
+    // L'iPhone arrête la reconnaissance régulièrement : on la relance tant qu'on est en marche.
+    if (running && S.method === 'text') setTimeout(() => {
+      if (running && S.method === 'text' && !rec) {
+        try { startText(); } catch (err) { pause(); showNotice("La reconnaissance s'est arrêtée. Touchez « Démarrer »."); }
+      }
+    }, 250);
+  };
+  rec = r;
+  r.start();
+  logEvent('Reconnaissance démarrée (' + S.lang + ')');
+}
+function stopText() {
+  if (!rec) return;
+  const r = rec; rec = null;
+  try { r.abort(); } catch (e) {}
+  speaking = false;
+}
+function addTextLog(t) {
+  logItems.push({ t: hhmmss(), k: 'ok', txt: '✓ n°' + count + ' — « …' + t.slice(-40) + ' »' });
+  if (logItems.length > 300) logItems.shift();
+  saveLog();
+  if (S.debug) renderLog();
+}
+
+/* =====================================================================
    4. COMPTEUR
    ===================================================================== */
 function setCount(n) { count = Math.max(0, Math.round(n)); save(); renderCount(); }
@@ -597,6 +703,7 @@ function micErrorMessage(e) {
   if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError'))
     return "L'accès au micro a été refusé.<b>Réglages de l'iPhone › Safari › Microphone › Autoriser, puis rechargez la page.</b>";
   if (e && e.name === 'NotFoundError') return "Aucun micro trouvé.";
+  if (e && e.name === 'NoSR') return "Cet appareil ne propose pas la reconnaissance du texte.<b>Réglages › Méthode de détection › choisissez « Rythme ».</b>";
   return "Le micro n'a pas pu démarrer (" + (e && (e.name || e.message)) + ").";
 }
 
@@ -604,7 +711,8 @@ async function start() {
   try {
     await ensureContext();
     primeSpeech();
-    if (micDead()) await startMic();
+    if (S.method === 'text') { stopMic(); running = true; startText(); }
+    else if (micDead()) await startMic();
     running = true; inVoice = false;
     muteUntil = performance.now() + 300;
     hideNotice();
@@ -618,6 +726,7 @@ async function start() {
 }
 function pause() {
   running = false; inVoice = false;
+  stopText();
   stopMic();
   releaseWake();
   logEvent('⏸ Pause');
@@ -628,7 +737,8 @@ function pause() {
 async function recover() {
   try {
     await ensureContext();
-    if (micDead()) { logEvent('Redémarrage du micro'); await startMic(); }
+    if (S.method === 'text') { if (!rec) { logEvent('Relance de la reconnaissance'); startText(); } }
+    else if (micDead()) { logEvent('Redémarrage du micro'); await startMic(); }
     inVoice = false; muteUntil = performance.now() + 500;
     keepAwake();
   } catch (e) {
@@ -689,12 +799,20 @@ function renderStatus() {
   const pill = $('status');
   pill.classList.toggle('on', running && !calibrating);
   pill.classList.toggle('calib', calibrating);
-  $('statusText').textContent = calibrating ? 'Calibration…' : running ? 'Micro actif' : 'En pause';
+  $('statusText').textContent = calibrating ? 'Calibration…' : running ? (S.method === 'text' ? 'Écoute du texte' : 'Micro actif') : 'En pause';
   const b = $('btnStart');
   b.textContent = running ? 'Pause' : 'Démarrer';
   b.classList.toggle('pause', running);
 }
 function renderMeter() {
+  if (S.method === 'text' && !analyser) {
+    // Pas de mesure de niveau en mode texte : la barre se remplit quand l'iPhone entend quelqu'un parler.
+    $('meterFill').style.width = (running && speaking) ? '100%' : (running && rec ? '12%' : '0');
+    $('meterFill').classList.toggle('above', running && speaking);
+    $('meterThr').style.display = 'none';
+    return;
+  }
+  $('meterThr').style.display = '';
   $('meterFill').style.width = pct(levelDb) + '%';
   $('meterFill').classList.toggle('above', levelDb > S.threshold);
   $('meterThr').style.left = 'calc(' + pct(S.threshold) + '% - 1px)';
@@ -760,7 +878,7 @@ function updateMicInfo() {
 function renderDebugLive(now) {
   $('dLevel').textContent = (analyser ? Math.round(levelDb) : '–') + ' dB';
   $('dThr').textContent = S.threshold + ' dB';
-  $('dState').textContent = !running ? 'arrêté' : now < muteUntil ? 'pause (son app)' : inVoice ? ('voix ' + Math.round(now - voiceStart) + ' ms') : 'silence';
+  $('dState').textContent = !running ? 'arrêté' : S.method === 'text' ? (rec ? (speaking ? 'texte : parole' : 'texte : écoute') : 'texte : relance…') : now < muteUntil ? 'pause (son app)' : inVoice ? ('voix ' + Math.round(now - voiceStart) + ' ms') : 'silence';
   $('dWake').textContent = wakeLock ? 'maintenu' : 'non maintenu';
   drawGraph();
 }
@@ -788,7 +906,7 @@ function drawGraph() {
   g.moveTo(0, y(S.threshold)); g.lineTo(w, y(S.threshold)); g.stroke(); g.setLineDash([]);
 }
 function logAsText() {
-  const head = 'Réglages : seuil ' + S.threshold + ' dB, min ' + S.minVoice + ' ms, silence ' + S.silence + ' ms, max ' + S.maxVoice +
+  const head = 'Méthode : ' + S.method + (S.method === 'text' ? ' (' + S.lang + ')' : '') + '\nRéglages : seuil ' + S.threshold + ' dB, min ' + S.minVoice + ' ms, silence ' + S.silence + ' ms, max ' + S.maxVoice +
     ' ms, écho ' + S.echo + ', bruit ' + S.noise + ', gain ' + S.agc + ', mode ' + S.mode + '\nMicro réel : ' + $('dMic').textContent + '\n\n';
   return head + logItems.map(i => i.t + '  ' + i.txt).join('\n');
 }
@@ -800,7 +918,7 @@ const FIELDS = {
   goal: 'int', threshold: 'int', calibMargin: 'int', minVoice: 'int', silence: 'int', maxVoice: 'int',
   echo: 'bool', noise: 'bool', agc: 'bool',
   beep1: 'int', beep2: 'int', beep3: 'int', voiceStep: 'int',
-  volume: 'float', tick: 'bool', debug: 'bool'
+  volume: 'float', tick: 'bool', debug: 'bool', lang: 'str'
 };
 const FMT = {
   threshold: v => v + ' dB', calibMargin: v => '+' + v + ' dB',
@@ -814,6 +932,14 @@ function syncSettingsUI() {
     const out = $('val-' + k); if (out) out.textContent = FMT[k](S[k]);
   }
   document.querySelectorAll('input[name=mode]').forEach(r => r.checked = r.value === S.mode);
+  document.querySelectorAll('input[name=method]').forEach(r => r.checked = r.value === S.method);
+  $('textOpts').hidden = S.method !== 'text';
+  $('rhythmOpts').hidden = S.method !== 'rhythm';
+  $('micOpts').hidden = S.method !== 'rhythm';
+  $('methodHint').textContent = S.method === 'text'
+    ? (SR ? "L'iPhone transcrit ce que vous dites et compte chaque « أستغفر » (ou « أتوب ») reconnu. Conseil : retour sonore en Bips (la voix peut couper la reconnaissance)."
+          : "⚠ Ce navigateur ne propose pas la reconnaissance du texte : choisissez « Rythme ».")
+    : "Compte chaque bloc de voix suivi d'un silence, sans comprendre les mots.";
   $('beepOpts').hidden = S.mode !== 'beep';
   $('voiceOpts').hidden = S.mode !== 'voice';
   document.querySelectorAll('#goalChips button').forEach(b => b.classList.toggle('sel', +b.dataset.goal === S.goal));
@@ -822,9 +948,11 @@ function onField(k) {
   const el = $('set-' + k), type = FIELDS[k];
   let v;
   if (type === 'bool') v = el.checked;
+  else if (type === 'str') v = el.value;
   else if (type === 'float') v = parseFloat(el.value);
   else v = parseInt(el.value, 10);
-  if (type !== 'bool' && !Number.isFinite(v)) return;
+  if (type !== 'bool' && type !== 'str' && !Number.isFinite(v)) return;
+  if (k === 'lang' && running) { S.lang = v; save(); pause(); showNotice('Langue changée. Touchez « Démarrer » pour reprendre.'); }
   if (['goal', 'beep1', 'beep2', 'beep3', 'voiceStep'].includes(k)) v = Math.max(1, v);
   S[k] = v; save();
   const out = $('val-' + k); if (out) out.textContent = FMT[k](v);
@@ -836,8 +964,12 @@ function onField(k) {
 }
 for (const k in FIELDS) {
   const el = $('set-' + k); if (!el) continue;
-  el.addEventListener(FIELDS[k] === 'bool' ? 'change' : 'input', () => onField(k));
+  el.addEventListener(FIELDS[k] === 'bool' || FIELDS[k] === 'str' ? 'change' : 'input', () => onField(k));
 }
+document.querySelectorAll('input[name=method]').forEach(r => r.addEventListener('change', () => {
+  if (running) { pause(); showNotice('Méthode changée. Touchez « Démarrer » pour reprendre.'); }
+  S.method = r.value; save(); syncSettingsUI(); renderAll();
+}));
 document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', () => { S.mode = r.value; save(); syncSettingsUI(); }));
 document.querySelectorAll('#goalChips button').forEach(b => b.addEventListener('click', () => { S.goal = +b.dataset.goal; save(); syncSettingsUI(); renderAll(); }));
 
